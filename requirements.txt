@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+pydicom
+oss2
+python-dotenv
+PyYAML
+python-multipart

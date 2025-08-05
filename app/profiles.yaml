@@ -1,0 +1,26 @@
+# profiles.yaml
+profiles:
+  default:  # 默认配置，较为保守
+    - tag: [0x0010, 0x0010]  # PatientName
+      action: "replace"
+      value: "ANONYMOUS"
+    - tag: [0x0010, 0x0020]  # PatientID
+      action: "hash"
+    - tag: [0x0010, 0x0030]  # PatientBirthDate
+      action: "remove"
+    - tag: [0x0008, 0x0090]  # ReferringPhysicianName
+      action: "empty"
+    # ... 其他基础规则
+
+  research: # 科研用，保留部分信息
+    - tag: [0x0010, 0x0010]
+      action: "replace"
+      value: "RESEARCH-PATIENT"
+    - tag: [0x0010, 0x0020]  # PatientID
+      action: "hash_persistent" # 可复现的哈希，以便关联同一患者数据
+      # secret_key: some_secret # 可以为项目配置一个密钥
+    - tag: [0x0010, 0x1010]  # PatientAge
+      action: "keep"
+    - tag: [0x0010, 0x0040]  # PatientSex
+      action: "keep"
+    # ... 其他科研规则
