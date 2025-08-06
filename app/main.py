@@ -16,12 +16,16 @@ app = FastAPI(
 )
 
 # Initialize Aliyun OSS Bucket
-try:
-    auth = oss2.Auth(settings.OSS_ACCESS_KEY_ID, settings.OSS_ACCESS_KEY_SECRET)
-    bucket = oss2.Bucket(auth, settings.OSS_ENDPOINT, settings.OSS_BUCKET_NAME)
-except Exception as e:
-    # This is a critical failure, the app shouldn't start.
-    raise RuntimeError(f"Failed to initialize Aliyun OSS bucket: {e}")
+bucket = None
+if not settings.DEV_MODE:
+    try:
+        auth = oss2.Auth(settings.OSS_ACCESS_KEY_ID, settings.OSS_ACCESS_KEY_SECRET)
+        bucket = oss2.Bucket(auth, settings.OSS_ENDPOINT, settings.OSS_BUCKET_NAME)
+    except Exception as e:
+        # This is a critical failure, the app shouldn't start.
+        raise RuntimeError(f"Failed to initialize Aliyun OSS bucket: {e}")
+else:
+    print("⚠️  Running in development mode - OSS functionality disabled")
 
 
 @app.post("/api/v1/anonymize")
@@ -61,26 +65,31 @@ async def anonymize_dicom_file(
             detail=f"An internal error occurred during file processing: {e}"
         )
 
-    try:
-        # Generate a unique object key for OSS
-        oss_key = f"anonymized/{uuid.uuid4()}.dcm"
+    # Generate a unique object key for OSS
+    oss_key = f"anonymized/{uuid.uuid4()}.dcm"
 
-        # Upload the in-memory buffer to OSS
-        bucket.put_object(oss_key, anonymized_file_buffer)
+    if settings.DEV_MODE:
+        # In development mode, simulate OSS upload
+        oss_url = f"https://dev-bucket.oss-cn-hangzhou.aliyuncs.com/{oss_key}"
+        print(f"🔧 DEV MODE: Simulated upload to {oss_url}")
+    else:
+        try:
+            # Upload the in-memory buffer to OSS
+            bucket.put_object(oss_key, anonymized_file_buffer)
 
-        # Construct the full OSS URL
-        oss_url = f"{settings.OSS_ENDPOINT.replace('https://', f'https://{settings.OSS_BUCKET_NAME}.')}/{oss_key}"
+            # Construct the full OSS URL
+            oss_url = f"{settings.OSS_ENDPOINT.replace('https://', f'https://{settings.OSS_BUCKET_NAME}.')}/{oss_key}"
 
-    except oss2.exceptions.OssError as e:
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload file to OSS: {e}"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred during OSS upload: {e}"
-        )
+        except oss2.exceptions.OssError as e:
+            raise HTTPException(
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to upload file to OSS: {e}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"An unexpected error occurred during OSS upload: {e}"
+            )
 
     # Build the success response
     response_data = {
@@ -98,3 +107,50 @@ async def anonymize_dicom_file(
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the DICOM Anonymizer Service. Use the /api/v1/anonymize endpoint to process files."}
+
+@app.get("/api/v1/profiles")
+def get_anonymizer_profiles():
+    """
+    获取可用的脱敏配置列表
+    """
+    try:
+        # 从配置文件中读取所有可用的配置
+        import yaml
+        with open(settings.PROFILES_PATH, "r", encoding="utf-8") as f:
+            all_profiles = yaml.safe_load(f)
+
+        if not all_profiles or 'profiles' not in all_profiles:
+            return JSONResponse(
+                status_code=HTTP_200_OK,
+                content={
+                    "success": True,
+                    "profiles": ["default"],
+                    "descriptions": {
+                        "default": "默认脱敏配置"
+                    }
+                }
+            )
+
+        profiles = list(all_profiles['profiles'].keys())
+        descriptions = {
+            "default": "默认脱敏配置，移除所有患者身份信息",
+            "research": "科研脱敏配置，保留部分医学信息用于研究"
+        }
+
+        return JSONResponse(
+            status_code=HTTP_200_OK,
+            content={
+                "success": True,
+                "profiles": profiles,
+                "descriptions": descriptions
+            }
+        )
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "success": False,
+                "error": f"Failed to load profiles: {e}"
+            }
+        )
